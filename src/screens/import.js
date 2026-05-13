@@ -52,20 +52,21 @@ export function importScreen(container) {
             <select class="select" id="views-select">
               <option value="6">6 views</option>
               <option value="8" selected>8 views</option>
-              <option value="10">10 views</option>
+              <option value="10">10 views (+ up)</option>
             </select>
           </div>
           <div class="input-group">
             <label class="input-label">Masking mode</label>
             <select class="select" id="mask-select">
+              <option value="none">None (fastest)</option>
               <option value="auto">Auto (YOLO + SAM2)</option>
               <option value="interactive">Interactive</option>
-              <option value="none">None</option>
             </select>
           </div>
           <div class="input-group">
             <label class="input-label">SfM engine</label>
             <select class="select" id="sfm-select">
+              <option value="synthetic" selected>Synthetic (360° — no COLMAP)</option>
               <option value="glomap">GLOMAP (faster)</option>
               <option value="colmap">COLMAP (standard)</option>
             </select>
@@ -92,6 +93,7 @@ export function importScreen(container) {
 
   // ── State ───────────────────────────────────────────────────────────────
   let selectedFile = null;
+  let videoFilePath = '';  // For Tauri: absolute path; for browser: filename
   let projectName = '';
 
   // ── Slider bindings ─────────────────────────────────────────────────────
@@ -102,6 +104,20 @@ export function importScreen(container) {
   // ── Drop zone ───────────────────────────────────────────────────────────
   const dropZone = document.getElementById('drop-zone');
   const fileInput = document.getElementById('file-input');
+
+  // Handle Tauri drag-drop events (sends file paths)
+  if (window.__TAURI__) {
+    window.__TAURI__.event.listen('tauri://drag-drop', (event) => {
+      const paths = event.payload.paths || event.payload;
+      if (Array.isArray(paths) && paths.length > 0) {
+        const filePath = paths[0];
+        const fileName = filePath.split(/[/\\]/).pop();
+        videoFilePath = filePath;
+        projectName = fileName.replace(/\.[^.]+$/, '');
+        showFileInfo(fileName, '—');
+      }
+    });
+  }
 
   dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -118,20 +134,31 @@ export function importScreen(container) {
   function handleFile(file) {
     selectedFile = file;
     projectName = file.name.replace(/\.[^.]+$/, '');
-    document.getElementById('video-name').textContent = file.name;
-    document.getElementById('video-size').textContent = formatSize(file.size);
+    // In browser mode, we'll use the file name and need to have the file 
+    // accessible to the backend. For development, we use a known path.
+    videoFilePath = file.name;
+    showFileInfo(file.name, formatSize(file.size));
+  }
+
+  function showFileInfo(name, size) {
+    document.getElementById('video-name').textContent = name;
+    document.getElementById('video-size').textContent = size;
     document.getElementById('video-info').style.display = 'block';
     document.getElementById('start-btn').disabled = false;
     dropZone.innerHTML = `
       <div class="drop-zone-icon">✅</div>
-      <div class="drop-zone-title">${file.name}</div>
-      <div class="drop-zone-subtitle">${formatSize(file.size)} — Click to change</div>
+      <div class="drop-zone-title">${name}</div>
+      <div class="drop-zone-subtitle">${size} — Click to change</div>
     `;
   }
 
   // ── Start pipeline ──────────────────────────────────────────────────────
   document.getElementById('start-btn').addEventListener('click', async () => {
-    if (!selectedFile) return;
+    if (!videoFilePath && !selectedFile) return;
+
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = true;
+    startBtn.textContent = 'Creating project...';
 
     const config = {
       fps: parseInt(document.getElementById('fps-slider').value),
@@ -144,15 +171,17 @@ export function importScreen(container) {
 
     try {
       // Create project first
-      const project = await api.createProject(projectName, selectedFile.name);
+      const project = await api.createProject(projectName, videoFilePath);
       
       // Start pipeline
       config.project_id = project.id;
-      api.startPipeline(config);
+      await api.startPipeline(config);
       
       // Navigate to pipeline screen
       window.location.hash = `#/pipeline`;
     } catch (e) {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Start Pipeline';
       alert('Failed to start pipeline: ' + e.message);
     }
   });

@@ -27,9 +27,10 @@ class ProjectInfo(BaseModel):
 
 class PipelineConfig(BaseModel):
     project_id: str
+    video_path: str = ""  # resolved at runtime from project meta
     fps: int = 2
     views_per_frame: int = 8
     crop_top_bottom: float = 0.15
     mask_mode: str = "auto"  # auto | interactive | none
-    sfm_engine: str = "glomap"  # glomap | colmap
+    sfm_engine: str = "glomap"  # glomap | colmap | synthetic
     max_iterations: int = 30000

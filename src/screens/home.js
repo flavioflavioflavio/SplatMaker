@@ -1,93 +1,93 @@
 /**
- * SplatMaker — Home Screen (Project List)
+ * SplatMaker — Home Screen (Project grid)
  */
 import { api } from '../lib/api.js';
+
+const STATUS_BADGES = {
+  created: { label: 'Created', color: 'var(--text-tertiary)' },
+  processing: { label: 'Processing', color: 'var(--accent)' },
+  done: { label: 'Complete', color: 'var(--success)' },
+  error: { label: 'Error', color: 'var(--error)' },
+};
 
 export function homeScreen(container) {
   container.innerHTML = `
     <div class="screen-header">
       <h1 class="screen-title">Projects</h1>
-      <p class="screen-subtitle">Your Gaussian Splat pipelines</p>
+      <p class="screen-subtitle">Your Gaussian Splat projects</p>
     </div>
-    <div style="margin-bottom:20px;">
-      <button class="btn btn-primary" id="new-project-btn">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 3V13M3 8H13"/>
-        </svg>
-        New Project
-      </button>
-    </div>
-    <div id="projects-grid" class="projects-grid">
-      <div class="empty-state">
-        <div class="empty-state-icon">🎯</div>
-        <div class="empty-state-title">No projects yet</div>
-        <div class="empty-state-text">Import an Insta360 video to create your first Gaussian Splat.</div>
-        <button class="btn btn-primary" id="empty-new-btn">Create Project</button>
+    <div class="project-grid" id="project-grid">
+      <div class="empty-state" id="loading-state">
+        <div class="empty-state-icon" style="animation:pulse 1.5s infinite">●</div>
+        <div class="empty-state-text">Loading projects...</div>
       </div>
     </div>
   `;
 
-  // Load projects
-  loadProjects(container);
-
-  // Bind new project buttons
-  const newBtn = document.getElementById('new-project-btn');
-  const emptyBtn = document.getElementById('empty-new-btn');
-  const goImport = () => { window.location.hash = '#/import'; };
-  newBtn?.addEventListener('click', goImport);
-  emptyBtn?.addEventListener('click', goImport);
+  loadProjects();
 }
 
-async function loadProjects(container) {
+async function loadProjects() {
+  const grid = document.getElementById('project-grid');
+  if (!grid) return;
+
   try {
     const data = await api.listProjects();
-    const grid = document.getElementById('projects-grid');
-    
-    if (data.projects && data.projects.length > 0) {
-      grid.innerHTML = data.projects.map(p => `
-        <div class="card project-card" data-id="${p.id}" data-status="${p.status}">
-          <div class="card-thumbnail">
-            ${p.thumbnail
-              ? `<img src="${p.thumbnail}" alt="${p.name}" />`
-              : `<div class="placeholder">🌐</div>`
-            }
-          </div>
-          <div class="card-name">${p.name}</div>
-          <div class="card-meta">
-            <span class="badge badge-${statusBadge(p.status)}">${p.status}</span>
-            <span>${p.frame_count || 0} frames</span>
-            <span>${formatDate(p.created_at)}</span>
-          </div>
-        </div>
-      `).join('');
+    const projects = data.projects || [];
 
-      // Click handlers
-      grid.querySelectorAll('.project-card').forEach(card => {
-        card.addEventListener('click', () => {
-          const id = card.dataset.id;
-          const status = card.dataset.status;
-          if (status === 'done') {
-            window.location.hash = `#/viewer/${id}`;
-          } else if (status === 'processing') {
-            window.location.hash = `#/pipeline/${id}`;
-          } else {
-            window.location.hash = `#/import/${id}`;
-          }
-        });
-      });
+    if (projects.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">📸</div>
+          <div class="empty-state-text">No projects yet</div>
+          <div class="empty-state-subtext">Import a 360° video to get started</div>
+          <a href="#/import" class="btn btn-primary" style="margin-top:16px">Import Video</a>
+        </div>
+      `;
+      return;
     }
+
+    grid.innerHTML = projects.map(p => {
+      const badge = STATUS_BADGES[p.status] || STATUS_BADGES.created;
+      const thumb = p.thumbnail
+        ? `<img src="http://127.0.0.1:8420${p.thumbnail}" alt="${p.name}" class="project-thumb" />`
+        : `<div class="project-thumb-placeholder">📦</div>`;
+      const frameText = p.frame_count ? `${p.frame_count} frames` : '';
+      const date = p.created_at ? new Date(p.created_at).toLocaleDateString() : '';
+      
+      // Determine click target based on status
+      const href = p.status === 'done' ? `#/viewer?id=${p.id}`
+                 : p.status === 'processing' ? `#/pipeline?id=${p.id}`
+                 : `#/import`;
+      
+      return `
+        <a href="${href}" class="project-card card" data-project-id="${p.id}">
+          <div class="project-thumb-wrap">${thumb}</div>
+          <div class="project-info">
+            <div class="project-name">${escapeHtml(p.name)}</div>
+            <div class="project-meta">
+              <span class="project-badge" style="color:${badge.color}">${badge.label}</span>
+              ${frameText ? `<span class="project-frames">${frameText}</span>` : ''}
+            </div>
+            <div class="project-date">${date}</div>
+          </div>
+        </a>
+      `;
+    }).join('');
+
   } catch (e) {
-    // Backend might not be ready yet — show empty state
+    grid.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">⚠️</div>
+        <div class="empty-state-text">Failed to load projects</div>
+        <div class="empty-state-subtext">${escapeHtml(e.message)}</div>
+      </div>
+    `;
   }
 }
 
-function statusBadge(status) {
-  const map = { created: 'info', processing: 'warning', done: 'success', error: 'error' };
-  return map[status] || 'info';
-}
-
-function formatDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
 }
