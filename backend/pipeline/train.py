@@ -1,124 +1,155 @@
 """
-Training — Gaussian Splat training via Nerfstudio splatfacto or gsplat.
-Sprint 2: checks for nerfstudio availability, structured for real integration.
+SplatMaker — Training Step
+Runs nerfstudio splatfacto training with real-time progress parsing.
 """
 import asyncio
-import subprocess
+import os
 import re
 import shutil
-import json
 from pathlib import Path
-from config import settings
 
 
-async def run_training(project_id: str, config, progress_callback):
-    """Train a Gaussian Splat model."""
-    proj_dir = Path(settings.projects_dir) / project_id
-    processed_dir = proj_dir / "processed"
-    output_dir = proj_dir / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
+async def run_training(project_id: str, config, progress_cb):
+    """
+    Train a Gaussian Splat model using nerfstudio's splatfacto.
     
-    max_iters = config.max_iterations
-    transforms_path = processed_dir / "transforms.json"
+    Requires:
+      - {project_dir}/transforms.json (from split or SfM step)
+      - {project_dir}/split/ directory with perspective images
+      
+    Produces:
+      - {project_dir}/outputs/ (nerfstudio checkpoints + logs)
+    """
+    from config import settings
+    project = Path(settings.projects_dir) / project_id
+    transforms = project / "transforms.json"
+    split_dir = project / "split"
+    output_dir = project / "outputs"
     
-    # Check if transforms.json exists
-    if not transforms_path.exists():
-        # Try project root
-        transforms_path = proj_dir / "transforms.json"
+    max_iters = getattr(config, 'max_iterations', 30000) if hasattr(config, 'max_iterations') else config.get("max_iterations", 30000)
     
-    if not transforms_path.exists():
-        raise RuntimeError("No transforms.json found. Run SfM step first.")
+    # ── Validate inputs ───────────────────────────────────────────────────
+    if not transforms.exists():
+        raise FileNotFoundError(f"transforms.json not found in {project}")
     
-    # Verify transforms
-    with open(transforms_path) as f:
-        transforms = json.load(f)
-    frame_count = len(transforms.get("frames", []))
-    await progress_callback(5, f"Found {frame_count} camera poses")
+    if not split_dir.exists() or not list(split_dir.glob("*.jpg")):
+        raise FileNotFoundError(f"No training images found in {split_dir}")
     
-    # Check for nerfstudio
+    image_count = len(list(split_dir.glob("*.jpg")))
+    await progress_cb(5, f"Found {image_count} training images")
+    
+    # ── Check for ns-train ────────────────────────────────────────────────
     ns_train = shutil.which("ns-train")
     
     if ns_train:
-        await progress_callback(10, "Nerfstudio found — starting splatfacto training...")
-        await _run_nerfstudio(ns_train, proj_dir, processed_dir, output_dir, 
-                              max_iters, progress_callback)
+        await _run_real_training(project, output_dir, max_iters, progress_cb)
     else:
-        # Nerfstudio not available — simulate training with progress
-        await progress_callback(10, "Nerfstudio not installed — running in preview mode")
-        await progress_callback(15, f"To enable real training, install nerfstudio:")
-        await progress_callback(15, "  pip install nerfstudio")
-        
-        # Simulate training progress for UI development
-        steps = 10
-        for i in range(steps):
-            await asyncio.sleep(0.5)
-            pct = int((i + 1) / steps * 80) + 15
-            iter_num = int(max_iters * (i + 1) / steps)
-            await progress_callback(pct, f"[Preview] Training: step {iter_num}/{max_iters}")
-        
-        # Create a placeholder output
-        placeholder = {
-            "model": "splatfacto",
-            "iterations": max_iters,
-            "frames": frame_count,
-            "status": "preview_mode",
-            "note": "Install nerfstudio for real training"
-        }
-        with open(output_dir / "training_info.json", "w") as f:
-            json.dump(placeholder, f, indent=2)
-    
-    await progress_callback(100, f"Training complete: {max_iters} iterations")
-    
-    return {
-        "output_dir": str(output_dir),
-        "iterations": max_iters,
-        "frames": frame_count,
-        "engine": "nerfstudio" if ns_train else "preview",
-    }
+        await progress_cb(10, "⚠ ns-train not found — running preview simulation")
+        await _run_preview(max_iters, progress_cb)
 
 
-async def _run_nerfstudio(ns_train, proj_dir, data_dir, output_dir, max_iters, progress_callback):
-    """Run nerfstudio splatfacto training with progress parsing."""
+async def _run_real_training(project: Path, output_dir: Path, max_iters: int, progress_cb):
+    """Execute actual nerfstudio splatfacto training."""
+    
+    await progress_cb(5, f"Starting splatfacto training ({max_iters} iterations)")
+    
+    # Build the ns-train command
     cmd = [
-        ns_train, "splatfacto",
-        "--data", str(data_dir),
+        "ns-train", "splatfacto",
+        "--data", str(project),
         "--output-dir", str(output_dir),
         "--max-num-iterations", str(max_iters),
-        "--pipeline.model.num-downscales", "0",
-        "--viewer.quit-on-train-completion", "True",
+        "--vis", "viewer",  # Enable browser viewer
+        "--pipeline.datamanager.camera-optimizer.mode", "off",  # Synthetic poses are exact
         "nerfstudio-data",
-        "--data", str(data_dir),
     ]
     
-    await progress_callback(15, f"ns-train splatfacto --max-num-iterations {max_iters}")
+    await progress_cb(8, f"Command: {' '.join(cmd)}")
     
+    # Launch the training process
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=str(project),
     )
     
-    # Parse training output for progress
-    async for line in process.stderr:
-        text = line.decode("utf-8", errors="replace").strip()
-        if not text:
-            continue
-        
-        # Parse iteration progress: "Step 1000/30000"
-        step_match = re.search(r"Step\s+(\d+)/(\d+)", text)
-        if step_match:
-            current = int(step_match.group(1))
-            total = int(step_match.group(2))
-            pct = min(int(current / total * 80) + 15, 95)
-            
-            # Parse loss if available
-            loss_match = re.search(r"loss[:\s]+([\d.]+)", text, re.IGNORECASE)
-            loss_str = f" | loss: {loss_match.group(1)}" if loss_match else ""
-            
-            await progress_callback(pct, f"Training: step {current}/{total}{loss_str}")
+    # Parse progress from stderr (nerfstudio outputs training logs there)
+    last_progress = 8
+    iter_pattern = re.compile(r"Step \(% Done\)\s+(\d+)/(\d+)")
+    loss_pattern = re.compile(r"loss[:\s]+([0-9.e+-]+)", re.IGNORECASE)
+    viewer_pattern = re.compile(r"Use this link to visualize:\s*(https?://\S+)")
     
-    await process.wait()
+    async def parse_stream(stream):
+        nonlocal last_progress
+        async for raw in stream:
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            
+            # Check for viewer URL
+            m = viewer_pattern.search(line)
+            if m:
+                await progress_cb(last_progress, f"📺 Viewer: {m.group(1)}")
+            
+            # Check for iteration progress
+            m = iter_pattern.search(line)
+            if m:
+                current = int(m.group(1))
+                total = int(m.group(2))
+                pct = int(10 + (current / total) * 85)  # Map 0-100% to 10-95%
+                pct = min(pct, 95)
+                
+                # Extract loss if present
+                lm = loss_pattern.search(line)
+                loss_str = f" | loss: {lm.group(1)}" if lm else ""
+                
+                if pct > last_progress + 1:  # Don't spam updates
+                    last_progress = pct
+                    await progress_cb(pct, f"Training: {current}/{total}{loss_str}")
     
-    if process.returncode != 0:
-        stderr = await process.stderr.read()
-        raise RuntimeError(f"Nerfstudio training failed (exit {process.returncode})")
+    # Parse both stdout and stderr concurrently
+    await asyncio.gather(
+        parse_stream(process.stdout),
+        parse_stream(process.stderr),
+    )
+    
+    returncode = await process.wait()
+    
+    if returncode != 0:
+        raise RuntimeError(f"ns-train failed with exit code {returncode}")
+    
+    await progress_cb(95, "Training complete — locating model checkpoint")
+    
+    # Find the latest checkpoint
+    ckpt = _find_latest_checkpoint(output_dir)
+    if ckpt:
+        await progress_cb(100, f"Model saved: {ckpt}")
+    else:
+        await progress_cb(100, "Training complete (no checkpoint found — check outputs/)")
+
+
+async def _run_preview(max_iters: int, progress_cb):
+    """Simulate training progress for UI development."""
+    steps = 20
+    for i in range(steps):
+        pct = int(10 + (i / steps) * 85)
+        fake_loss = round(0.5 * (1 - i / steps) ** 2 + 0.001, 4)
+        current = int((i / steps) * max_iters)
+        await progress_cb(pct, f"[PREVIEW] Step {current}/{max_iters} | loss: {fake_loss}")
+        await asyncio.sleep(0.3)
+    
+    await progress_cb(100, "[PREVIEW] Training simulation complete")
+
+
+def _find_latest_checkpoint(output_dir: Path) -> str | None:
+    """Find the most recent nerfstudio checkpoint in the output directory."""
+    if not output_dir.exists():
+        return None
+    
+    # nerfstudio saves checkpoints like: outputs/splatfacto/YYYY-MM-DD_HHMMSS/nerfstudio_models/
+    ckpts = sorted(output_dir.rglob("step-*.ckpt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if ckpts:
+        return str(ckpts[0])
+    
+    return None

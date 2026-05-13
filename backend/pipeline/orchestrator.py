@@ -82,6 +82,7 @@ class PipelineOrchestrator:
                 await self.ws.send_progress(name, "error", 0,
                                             str(e), elapsed)
                 await self.ws.send_log(f"Step {name} failed: {e}", "error")
+                await self.ws.send_error(name, str(e))
                 self._update_project_status(config.project_id, "error")
                 self.running = False
                 return {"status": "error", "step": name, "error": str(e)}

@@ -60,3 +60,11 @@ class WSManager:
             "splat_path": splat_path,
             "total_time_seconds": round(total_time, 1),
         })
+    
+    async def send_error(self, step: str, error: str):
+        """Send pipeline error message."""
+        await self.broadcast({
+            "type": "pipeline_error",
+            "step": step,
+            "error": error,
+        })

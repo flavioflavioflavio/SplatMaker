@@ -1,93 +1,157 @@
 """
-Export — PLY/SPLAT export from trained model.
-Sprint 2: checks for ns-export, creates export artifacts info.
+SplatMaker — Export Step
+Exports trained model to .ply splat file using nerfstudio ns-export.
 """
 import asyncio
-import subprocess
-import shutil
 import json
+import os
+import re
+import shutil
 from pathlib import Path
-from config import settings
 
 
-async def export_splat(project_id: str, config, progress_callback):
-    """Export trained model to .ply and/or .splat format."""
-    proj_dir = Path(settings.projects_dir) / project_id
-    output_dir = proj_dir / "output"
-    export_dir = proj_dir / "export"
+async def export_splat(project_id: str, config, progress_cb):
+    """
+    Export the trained Gaussian Splat model to a .ply file.
+    
+    Looks for the latest nerfstudio checkpoint in {project_dir}/outputs/
+    and runs ns-export gaussian-splat to produce a .ply file.
+    """
+    from config import settings
+    project = Path(settings.projects_dir) / project_id
+    output_dir = project / "outputs"
+    export_dir = project / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
     
-    await progress_callback(10, "Preparing export...")
+    await progress_cb(5, "Looking for trained model checkpoint...")
     
-    # Check for nerfstudio export
+    # ── Find the latest config.yml from training ──────────────────────────
     ns_export = shutil.which("ns-export")
+    config_yml = _find_config_yml(output_dir)
     
-    # Look for trained model config
-    config_path = None
-    for yml in output_dir.rglob("config.yml"):
-        config_path = yml
-        break
-    
-    if ns_export and config_path:
-        await progress_callback(20, "Exporting Gaussian Splat via ns-export...")
-        
-        cmd = [
-            ns_export, "gaussian-splat",
-            "--load-config", str(config_path),
-            "--output-dir", str(export_dir),
-        ]
-        
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, timeout=600
-        )
-        
-        if result.returncode != 0:
-            await progress_callback(50, f"ns-export warning: {result.stderr[:200]}")
-        else:
-            await progress_callback(80, "Export successful")
+    if ns_export and config_yml:
+        await _run_real_export(config_yml, export_dir, progress_cb)
     else:
-        # No trained model or ns-export not available
-        await progress_callback(30, "No trained model found — creating export summary...")
+        if not ns_export:
+            await progress_cb(10, "⚠ ns-export not found")
+        elif not config_yml:
+            await progress_cb(10, "⚠ No training config found in outputs/")
         
-        # Generate an export summary with project info
-        summary = {
-            "project_id": project_id,
-            "status": "pending_training",
-            "note": "Complete the training step to generate exportable splat files.",
-        }
-        
-        # Check what data we have
-        transforms_path = proj_dir / "transforms.json"
-        if transforms_path.exists():
-            with open(transforms_path) as f:
-                transforms = json.load(f)
-            summary["camera_poses"] = len(transforms.get("frames", []))
-        
-        split_dir = proj_dir / "split"
-        if split_dir.exists():
-            summary["perspective_views"] = len(list(split_dir.glob("*.jpg")))
-        
-        frames_dir = proj_dir / "frames"
-        if frames_dir.exists():
-            summary["source_frames"] = len(list(frames_dir.glob("*.jpg")))
-        
-        with open(export_dir / "export_summary.json", "w") as f:
-            json.dump(summary, f, indent=2)
-        
-        await progress_callback(80, "Export summary generated")
+        await _generate_summary(project, export_dir, progress_cb)
     
-    # List all exportable files
+    await progress_cb(100, "Export complete")
+
+
+async def _run_real_export(config_yml: str, export_dir: Path, progress_cb):
+    """Run ns-export gaussian-splat to produce a .ply file."""
+    
+    await progress_cb(10, "Exporting Gaussian Splat to PLY...")
+    
+    ply_path = export_dir / "splat.ply"
+    
+    cmd = [
+        "ns-export", "gaussian-splat",
+        "--load-config", str(config_yml),
+        "--output-dir", str(export_dir),
+    ]
+    
+    await progress_cb(20, f"Running: {' '.join(cmd)}")
+    
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    
+    # Parse export progress
+    async for raw in process.stderr:
+        line = raw.decode("utf-8", errors="replace").strip()
+        if line:
+            if "Saving" in line or "Export" in line:
+                await progress_cb(60, line)
+    
+    stdout, _ = await process.communicate()
+    returncode = process.returncode
+    
+    if returncode != 0:
+        raise RuntimeError(f"ns-export failed with exit code {returncode}")
+    
+    # Check output
     ply_files = list(export_dir.glob("*.ply"))
-    splat_files = list(export_dir.glob("*.splat"))
+    if ply_files:
+        size_mb = ply_files[0].stat().st_size / (1024 * 1024)
+        await progress_cb(90, f"Exported: {ply_files[0].name} ({size_mb:.1f} MB)")
+    else:
+        await progress_cb(90, "Export completed but no PLY file found")
+
+
+async def _generate_summary(project: Path, export_dir: Path, progress_cb):
+    """Generate a project summary when no trained model is available."""
     
-    ply_path = str(ply_files[0]) if ply_files else None
-    splat_path = str(splat_files[0]) if splat_files else None
+    await progress_cb(20, "Generating project summary...")
     
-    await progress_callback(100, "Export complete")
-    
-    return {
-        "ply_path": ply_path,
-        "splat_path": splat_path,
-        "export_dir": str(export_dir),
-        "has_model": bool(ply_files or splat_files),
+    summary = {
+        "project_dir": str(project),
+        "status": "partial",
+        "available_outputs": {},
     }
+    
+    # Check what's available
+    transforms = project / "transforms.json"
+    if transforms.exists():
+        with open(transforms) as f:
+            data = json.load(f)
+        frame_count = len(data.get("frames", []))
+        summary["available_outputs"]["transforms"] = {
+            "path": str(transforms),
+            "frames": frame_count,
+            "camera_model": data.get("camera_model", "unknown"),
+        }
+        await progress_cb(40, f"transforms.json: {frame_count} camera poses")
+    
+    split_dir = project / "split"
+    if split_dir.exists():
+        images = list(split_dir.glob("*.jpg"))
+        summary["available_outputs"]["split_images"] = {
+            "path": str(split_dir),
+            "count": len(images),
+        }
+        await progress_cb(50, f"Perspective views: {len(images)} images")
+    
+    frames_dir = project / "frames"
+    if frames_dir.exists():
+        frames = list(frames_dir.glob("*.jpg"))
+        summary["available_outputs"]["frames"] = {
+            "path": str(frames_dir),
+            "count": len(frames),
+        }
+        await progress_cb(60, f"Extracted frames: {len(frames)}")
+    
+    thumb = project / "thumbnail.jpg"
+    if thumb.exists():
+        summary["available_outputs"]["thumbnail"] = str(thumb)
+    
+    # Write summary
+    summary_path = export_dir / "summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    
+    await progress_cb(80, f"Summary written to {summary_path.name}")
+    
+    # If transforms exist but no model, still very useful
+    if transforms.exists():
+        await progress_cb(90, "✅ Camera poses ready — can be used with any 3DGS trainer")
+
+
+def _find_config_yml(output_dir: Path) -> str | None:
+    """Find the most recent nerfstudio config.yml in the output directory."""
+    if not output_dir.exists():
+        return None
+    
+    configs = sorted(
+        output_dir.rglob("config.yml"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    
+    return str(configs[0]) if configs else None

@@ -116,6 +116,18 @@
 .viewer-toolbar .btn { padding:8px 12px; border-radius:var(--radius-full); }
 .viewer-empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
   width:100%; height:100%; }
+.viewer-controls-overlay {
+  position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+  pointer-events:none; z-index:10;
+}
+.viewer-controls-hint {
+  display:flex; gap:16px; padding:8px 20px;
+  background:rgba(13,13,20,0.75); backdrop-filter:blur(12px);
+  border-radius:var(--radius-full); border:1px solid var(--border);
+  font-size:var(--text-xs); color:var(--text-tertiary);
+}
+.viewer-controls-hint span { white-space:nowrap; }
+.viewer-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 
 /* ── Export Screen ─────────────────────────────────────────────────────── */
 .export-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px; }

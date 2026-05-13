@@ -75,8 +75,31 @@ export function pipelineScreen(container) {
 
   unsubs.push(wsManager.on('pipeline_complete', (data) => {
     document.getElementById('pipeline-subtitle').textContent =
-      `Complete! Total time: ${formatTime(data.total_time_seconds)}`;
+      `✅ Complete in ${formatTime(data.total_time_seconds)}`;
     addLog(state, `Pipeline complete in ${formatTime(data.total_time_seconds)}`, 'info');
+    
+    // Show completion actions
+    const stopBtn = document.getElementById('stop-btn');
+    if (stopBtn) {
+      stopBtn.outerHTML = `
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <a href="#/viewer" class="btn btn-primary">🌐 View in 3D</a>
+          <a href="#/export" class="btn btn-secondary">📦 Export</a>
+          <a href="#/" class="btn btn-secondary">← Projects</a>
+        </div>
+      `;
+    }
+    
+    // Mark overall progress as 100%
+    const overallEl = document.getElementById('overall-progress');
+    if (overallEl) overallEl.style.width = '100%';
+  }));
+
+  // Pipeline error handler
+  unsubs.push(wsManager.on('pipeline_error', (data) => {
+    document.getElementById('pipeline-subtitle').textContent =
+      `❌ Failed at ${data.step || 'unknown'}: ${data.error || ''}`;
+    addLog(state, `ERROR: ${data.error || 'Unknown error'}`, 'error');
   }));
 
   return {
