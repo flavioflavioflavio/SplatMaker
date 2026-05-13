@@ -1,0 +1,20 @@
+{
+  "name": "splatmaker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "vite": "^6.0.0"
+  }
+}

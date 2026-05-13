@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SplatMaker — Convert Insta360 video to Gaussian Splats" />
+    <title>SplatMaker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles/index.css" />
+    <link rel="stylesheet" href="/styles/components.css" />
+    <link rel="stylesheet" href="/styles/screens.css" />
+    <script type="module" src="/main.js"></script>
+  </head>
+  <body>
+    <!-- Loading overlay — shown while waiting for Python backend -->
+    <div id="loading-overlay" class="loading-overlay">
+      <div class="loading-content">
+        <div class="loading-logo">
+          <div class="splat-orb">
+            <div class="orb-ring"></div>
+            <div class="orb-ring"></div>
+            <div class="orb-ring"></div>
+            <div class="orb-core"></div>
+          </div>
+        </div>
+        <h1 class="loading-title">SplatMaker</h1>
+        <p class="loading-subtitle">Initializing pipeline engine...</p>
+        <div class="loading-bar">
+          <div class="loading-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main app container -->
+    <div id="app" class="app" style="display: none;">
+      <!-- Sidebar navigation -->
+      <nav id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <div class="sidebar-logo">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+              <circle cx="14" cy="14" r="12" stroke="url(#logo-grad)" stroke-width="2.5" fill="none"/>
+              <circle cx="14" cy="14" r="6" fill="url(#logo-grad)" opacity="0.6"/>
+              <circle cx="14" cy="14" r="3" fill="var(--accent)"/>
+              <defs>
+                <linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28">
+                  <stop offset="0%" stop-color="var(--accent)"/>
+                  <stop offset="100%" stop-color="var(--accent-secondary)"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <span class="sidebar-title">SplatMaker</span>
+        </div>
+        
+        <div class="sidebar-nav">
+          <a href="#/" class="nav-item active" data-route="home" id="nav-home">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M3 10L10 3L17 10V17H12V13H8V17H3V10Z"/>
+            </svg>
+            <span>Projects</span>
+          </a>
+          <a href="#/import" class="nav-item" data-route="import" id="nav-import">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M10 3V13M10 13L6 9M10 13L14 9"/>
+              <path d="M3 14V16H17V14"/>
+            </svg>
+            <span>Import</span>
+          </a>
+          <a href="#/pipeline" class="nav-item" data-route="pipeline" id="nav-pipeline">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="4" cy="10" r="2"/>
+              <circle cx="10" cy="10" r="2"/>
+              <circle cx="16" cy="10" r="2"/>
+              <path d="M6 10H8M12 10H14"/>
+            </svg>
+            <span>Pipeline</span>
+          </a>
+          <a href="#/viewer" class="nav-item" data-route="viewer" id="nav-viewer">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M2 10C2 10 5 4 10 4C15 4 18 10 18 10C18 10 15 16 10 16C5 16 2 10 2 10Z"/>
+              <circle cx="10" cy="10" r="3"/>
+            </svg>
+            <span>Viewer</span>
+          </a>
+          <a href="#/export" class="nav-item" data-route="export" id="nav-export">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M10 13V3M10 3L6 7M10 3L14 7"/>
+              <path d="M3 14V16H17V14"/>
+            </svg>
+            <span>Export</span>
+          </a>
+        </div>
+        
+        <div class="sidebar-footer">
+          <div class="sidebar-status" id="backend-status">
+            <div class="status-dot"></div>
+            <span>Connecting...</span>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Main content area -->
+      <main id="main-content" class="main-content">
+        <!-- Screens rendered here by router -->
+      </main>
+    </div>
+  </body>
+</html>
